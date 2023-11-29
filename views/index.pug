@@ -5,9 +5,33 @@ html(lang="en")
         meta(name="viewport", content="width=device-width, initial-scale=1.0")
         title Gift Dibs
     body 
-        h1 - - 
+        h1 Gift Dibs
         p Your Groups:
         ul 
             each group in groups 
                 li 
                     a(href="/group/"+group.uid) #{group.name}
+        p Your reserved gifts: 
+        ul 
+            each gift in gifts 
+                li(data-giftid=gift.uid, data-name=gift.title, data-description=gift.description, data-link=gift.link)
+                    a(href=gift.link) #{gift.title}
+                    |  for <b>#{gift.username}</b> 
+                    br
+                    | #{gift.description}
+                    button.edit Edit
+                    button.delete X
+        form(action="", id="edit" method="post") 
+            p 
+                label(for="name") Gift Name: 
+                input(type="text", name="name")
+            p 
+                label(for="description") Gift Description: 
+                input(type="text", name="description")
+            p
+                label(for="link") Link: 
+                input(type="url", name="link")
+            p
+                input(type="submit", value="Save")
+        //- form(action="/delete/dibs, method="post")
+        script(src="/static/scripts/edit_gift.js") 

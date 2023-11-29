@@ -15,7 +15,7 @@ html(lang="en")
             each gift in gifts 
                 li <b>#{gift.from}</b> reserved 
                     a(href=gift.link) #{gift.title}
-                    |  for #{gift.to} 
+                    |  for <b>#{gift.to}</b> 
                     br
                     | #{gift.description}
         form(action="/invite", method="post")

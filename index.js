@@ -51,7 +51,10 @@ const getGroupMembersStatement = database.prepare("SELECT * FROM users WHERE uid
 
 const getGiftsByGroupStatement = database.prepare("SELECT * FROM gifts WHERE group_id = ?");
 const getGiftsByGroupNotUser = database.prepare("SELECT * FROM gifts WHERE group_id = ? AND to_ != ?");
+const getOutgoingGifts = database.prepare("SELECT * FROM users JOIN gifts ON gifts.to_ = users.uid WHERE from_ = ?");
 const getGiftsAndUsersByGroupStatement = database.prepare("SELECT gifts.uid, gifts.from_, gifts.to_, gifts.group_id, gifts.title, gifts.description, gifts.link, to_.username as 'to', from_.username as 'from' FROM gifts JOIN users to_ ON gifts.to_ = to_.uid JOIN users from_ ON gifts.from_ = from_.uid WHERE gifts.group_id = ? AND gifts.to_ != ?");
+const getGiftById = database.prepare("SELECT * FROM gifts WHERE uid = ?");
+const deleteGiftById = database.prepare("DELETE FROM gifts WHERE uid = ?");
 
 const addMemberStatement = database.prepare("INSERT INTO membership (user, group_id) VALUES (?, ?)");
 const getUsersMembershipsStatement = database.prepare("SELECT group_id FROM membership WHERE user = ?");
@@ -109,9 +112,10 @@ app.post("/login", async (req, res) => {
 
 app.get("/", [verifyToken, redirectAnonymous], (req, res) => {
     const groups = getUsersGroupsStatement.all(req.decoded.uid);
+    const gifts = getOutgoingGifts.all(req.decoded.uid);
     res.render("index", {
         message: "Hello world!",
-        groups
+        groups, gifts
     });
 });
 
@@ -181,6 +185,20 @@ app.post("/dibs", [verifyToken, redirectAnonymous], (req, res)=>{
     createGiftStatement.run(req.decoded.uid, for_, group_id, title, description, link);
     res.json({ success: true });
 });
+app.post("/update/dibs/:id", [verifyToken, redirectAnonymous], (req, res)=>{
+    
+});
+app.post("/delete/dibs/:id", [verifyToken, redirectAnonymous], (req, res)=>{
+    const gift = getGiftById.get(req.params.id);
+    if(!gift)
+        return res.status(400).json({ error: "Gift not found" });
+    if(req.decoded.uid != gift.from_)
+        return res.status(403).json({ error: "You are not the owner of this gift" });
+    deleteGiftById.run(req.params.id);
+    res.json({ success: true });
+});
+
+// TODO: make redirectAnonymous treat POST requests differently
 
 app.listen(PORT, HOST, () => {
     console.log(`Listening on http://${HOST}:${PORT}`);
