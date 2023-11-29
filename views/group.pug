@@ -27,7 +27,8 @@ html(lang="en")
             h3 Reserve a gift 
             select(name="for_")
                 each member in members 
-                    option(value=member.uid) #{member.username}
+                    if member.uid != uid
+                        option(value=member.uid) #{member.username}
             input(type="hidden", name="group_id", value=group.uid)
             p
                 label(for="name") Gift Name: 

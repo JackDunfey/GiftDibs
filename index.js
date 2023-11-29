@@ -143,7 +143,7 @@ app.get("/group/:id", [verifyToken, redirectAnonymous], (req, res) => {
     const gifts = getGiftsAndUsersByGroupStatement.all(req.params.id, req.decoded.uid);
     const members = getGroupMembersStatement.all(req.params.id);
     const messages = getGroupMessagesStatement.all(req.params.id);
-    res.render("group", { group, gifts, members: members.map(({uid, username})=>Object.assign({},{uid,username})), messages });
+    res.render("group", { group, gifts, members: members.map(({uid, username})=>Object.assign({},{uid,username})), messages, uid: req.decoded.uid });
 });
 app.get("/invites", [verifyToken, redirectAnonymous], (req, res) => {
     const invites = getUserGroupInviteStatement.all(req.decoded.uid);
