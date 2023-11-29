@@ -61,6 +61,7 @@ const addMemberStatement = database.prepare("INSERT INTO membership (user, group
 const getUsersMembershipsStatement = database.prepare("SELECT group_id FROM membership WHERE user = ?");
 const getUsersGroupsStatement = database.prepare("SELECT * FROM groups WHERE uid IN (SELECT group_id FROM membership WHERE user = ?)");
 const checkMembershipStatement = database.prepare("SELECT * FROM membership WHERE user = ? AND group_id = ?");
+const deleteMembershipStatement = database.prepare("DELETE FROM membership WHERE user = ? AND group_id = ?");
 
 const inviteUserStatement = database.prepare("INSERT INTO invites (from_, to_, group_id) VALUES (?, ?, ?)");
 const deleteInviteStatement = database.prepare("DELETE FROM invites WHERE uid = ?");
@@ -174,7 +175,19 @@ app.get("/accept/:id", [verifyToken, redirectAnonymous], (req, res)=>{
     addMemberStatement.run(req.decoded.uid, invite.group_id);
     res.json({success: true});
 });
-
+app.get("/decline/:id", [verifyToken, redirectAnonymous], (req, res)=>{
+    res.json({success: false, error: "???"});
+});
+app.get("/leave/:id", [verifyToken, redirectAnonymous], (req, res)=>{
+    const isMember = checkMembershipStatement.get(req.decoded.uid, req.params.id);
+    if(!isMember)
+        return res.status(403).json({ error: "You are not a member of this group" });
+    deleteMembershipStatement.run(req.decoded.uid, req.params.id);
+    database.prepare("DELETE FROM gifts WHERE (to_ = ? OR from_ = ?) AND group_id = ?").run(req.decoded.uid, req.params.id);
+    database.prepare("DELETE FROM messages WHERE (to_ = ? OR from_ = ?) AND group_id = ?").run(req.decoded.uid, req.params.id);
+    // Delete all traces of user in group
+    res.json({success: true});
+});
 
 // GIFTS
 app.post("/dibs", [verifyToken, redirectAnonymous], (req, res)=>{

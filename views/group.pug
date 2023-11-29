@@ -5,8 +5,9 @@ html(lang="en")
         meta(name="viewport", content="width=device-width, initial-scale=1.0")
         title Group 
     body 
-        p #{group.name}
-        p #{group.description}
+        h1 #{group.name}
+        h2 #{group.description}
+        p Members: 
         ul 
             each member in members 
                 li #{member.username}
@@ -14,10 +15,12 @@ html(lang="en")
         ul
             each gift in gifts 
                 li <b>#{gift.from}</b> reserved 
-                    a(href=gift.link) #{gift.title}
+                    a(href=gift.link target="_blank") #{gift.title}
                     |  for <b>#{gift.to}</b> 
                     br
                     | #{gift.description}
+        p
+            a(href="/leave/"+group.uid style="color: red;") Leave Group
         form(action="/invite", method="post")
             h3 Invite a User: 
             input(type="text", name="email")
@@ -41,3 +44,5 @@ html(lang="en")
                 input(type="url", name="link")
             p 
                 input(type="submit", value="Dibs!")
+        p
+            a(href="/") Back to Home

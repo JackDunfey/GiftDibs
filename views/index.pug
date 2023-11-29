@@ -6,6 +6,8 @@ html(lang="en")
         title Gift Dibs
     body 
         h1 Gift Dibs
+        p
+            a(href="/create") Create a Group
         p Your Groups:
         ul 
             each group in groups 
@@ -15,7 +17,7 @@ html(lang="en")
         ul 
             each gift in gifts 
                 li(data-giftid=gift.uid, data-name=gift.title, data-description=gift.description, data-link=gift.link)
-                    a(href=gift.link) #{gift.title}
+                    a(href=gift.link target="_blank") #{gift.title}
                     |  for <b>#{gift.username}</b> 
                     br
                     | #{gift.description}
