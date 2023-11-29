@@ -55,6 +55,7 @@ const getOutgoingGifts = database.prepare("SELECT * FROM users JOIN gifts ON gif
 const getGiftsAndUsersByGroupStatement = database.prepare("SELECT gifts.uid, gifts.from_, gifts.to_, gifts.group_id, gifts.title, gifts.description, gifts.link, to_.username as 'to', from_.username as 'from' FROM gifts JOIN users to_ ON gifts.to_ = to_.uid JOIN users from_ ON gifts.from_ = from_.uid WHERE gifts.group_id = ? AND gifts.to_ != ?");
 const getGiftById = database.prepare("SELECT * FROM gifts WHERE uid = ?");
 const deleteGiftById = database.prepare("DELETE FROM gifts WHERE uid = ?");
+const updateGiftStatement = database.prepare("UPDATE gifts SET title = ?, description = ?, link = ? WHERE uid = ?");
 
 const addMemberStatement = database.prepare("INSERT INTO membership (user, group_id) VALUES (?, ?)");
 const getUsersMembershipsStatement = database.prepare("SELECT group_id FROM membership WHERE user = ?");
@@ -186,7 +187,14 @@ app.post("/dibs", [verifyToken, redirectAnonymous], (req, res)=>{
     res.json({ success: true });
 });
 app.post("/update/dibs/:id", [verifyToken, redirectAnonymous], (req, res)=>{
-    
+    const gift = getGiftById.get(req.params.id);
+    if(!gift)
+        return res.status(400).json({ error: "Gift not found" });
+    if(req.decoded.uid != gift.from_)
+        return res.status(403).json({ error: "You are not the owner of this gift" });
+    const { name: title, description, link } = req.body;
+    updateGiftStatement.run(title, description, link, req.params.id);
+    res.redirect(`/`);
 });
 app.post("/delete/dibs/:id", [verifyToken, redirectAnonymous], (req, res)=>{
     const gift = getGiftById.get(req.params.id);
