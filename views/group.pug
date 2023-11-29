@@ -1,0 +1,42 @@
+doctype html
+html(lang="en")
+    head
+        meta(charset="UTF-8")
+        meta(name="viewport", content="width=device-width, initial-scale=1.0")
+        title Group 
+    body 
+        p #{group.name}
+        p #{group.description}
+        ul 
+            each member in members 
+                li #{member.username}
+        h3 Gifts:
+        ul
+            each gift in gifts 
+                li <b>#{gift.from}</b> reserved 
+                    a(href=gift.link) #{gift.title}
+                    |  for #{gift.to} 
+                    br
+                    | #{gift.description}
+        form(action="/invite", method="post")
+            h3 Invite a User: 
+            input(type="text", name="email")
+            input(type="hidden", name="group_id", value=group.uid)
+            input(type="submit", value="Invite") 
+        form(action="/dibs", method="post") 
+            h3 Reserve a gift 
+            select(name="for_")
+                each member in members 
+                    option(value=member.uid) #{member.username}
+            input(type="hidden", name="group_id", value=group.uid)
+            p
+                label(for="name") Gift Name: 
+                input(type="text", name="gift_name")
+            p
+                label(for="description") Gift Description: 
+                input(type="text", name="gift_description")
+            p
+                label(for="link") Link: 
+                input(type="url", name="link")
+            p 
+                input(type="submit", value="Dibs!")
