@@ -60,11 +60,15 @@ html(lang="en")
                 input(type="submit", value="Dibs!")
         p
             a(href="/") Back to Home
-        .messages 
-            if messages 
-                each message in messages 
-                    p <b>#{message.from_name}</b>: #{message.message}
-            form(action="/message/"+group.uid, method="post") 
+        .messages
+            #messages 
+                if messages 
+                    each message in messages 
+                        p <b>#{message.from_name}</b>: #{message.message}
+            form(name="messageForm" method="post") 
                 input(type="text", name="message")
                 input(type="submit", value="Send")
-        script(src="/static/scripts/invite.js")
+        script(src="https://cdn.socket.io/4.7.2/socket.io.min.js")
+        script const group_id = #{group.uid};
+        script(src="/static/scripts/w3s_cookie.js")
+        script(src="/static/scripts/messages.js") 

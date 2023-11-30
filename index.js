@@ -4,7 +4,7 @@ require("dotenv/config");
 
 const DEBUG = false;
 const DB_PERFORMANCE_MODE = false
-const DB_LOG = true;
+const DB_LOG = false;
 
 const express = require("express");
 const app = express();
@@ -37,6 +37,7 @@ database.prepare("CREATE TABLE IF NOT EXISTS gifts (uid INTEGER PRIMARY KEY AUTO
 database.prepare("CREATE TABLE IF NOT EXISTS membership (uid INTEGER PRIMARY KEY AUTOINCREMENT, user INTEGER, group_id INTEGER)").run();
 database.prepare("CREATE TABLE IF NOT EXISTS messages (uid INTEGER PRIMARY KEY AUTOINCREMENT, from_ INTEGER, group_id INTEGER, message TEXT)").run();
 database.prepare("CREATE TABLE IF NOT EXISTS invites (uid INTEGER PRIMARY KEY AUTOINCREMENT, from_ INTEGER, to_ INTEGER, group_id INTEGER)").run();
+database.prepare("CREATE TABLE IF NOT EXISTS sessions (uid INTEGER PRIMARY KEY AUTOINCREMENT, user INTEGER, socket_id TEXT)").run();
 // STATEMENTS
 // TODO: research joins
 const createGroupStatement = database.prepare("INSERT INTO groups (name, description) VALUES (?, ?)");
@@ -70,8 +71,14 @@ const isInvitedStatement = database.prepare("SELECT * FROM invites WHERE to_ = ?
 const getInviteStatement = database.prepare("SELECT * FROM invites WHERE from_ = ? AND to_ = ? AND group_id = ?");
 const getUserGroupInviteStatement = database.prepare("SELECT invites.uid, invites.from_, invites.to_, invites.group_id, groups.name, groups.description FROM invites JOIN groups ON invites.group_id = groups.uid WHERE invites.to_ = ?");
 const getPendngInvitesByGroup = database.prepare("SELECT invites.uid, invites.group_id, from_.username as 'from_name', to_.username as 'to_name', from_.uid as 'from_', to_.uid as 'to_' FROM invites JOIN users to_ ON invites.to_ = to_.uid JOIN users from_ ON invites.from_ = from_.uid WHERE invites.group_id = ?");
-// TODO: Add messages last
 
+const createSessionStatement = database.prepare("INSERT INTO sessions (user, socket_id) VALUES (?, ?)");
+const updateSessionStatement = database.prepare("UPDATE sessions SET socket_id = ? WHERE user = ?");
+const getSessionStatement = database.prepare("SELECT * FROM sessions WHERE socket_id = ?");
+const getSessionByUserStatement = database.prepare("SELECT * FROM sessions WHERE user = ?");
+const deleteSessionStatement = database.prepare("DELETE FROM sessions WHERE socket_id = ?");
+const deleteSessionByUserStatement = database.prepare("DELETE FROM sessions WHERE user = ?");
+// Make sessions expire automatically
 
 // REGISTER AND LOGIN
 function registerUser(username, email, password) {
@@ -205,20 +212,6 @@ app.get("/join/:invite_id", [verifyToken, redirectAnonymous], (req, res)=>{
     addMemberStatement.run(req.decoded.uid, group.uid);
     res.redirect(`/group/${group.uid}`)
 })
-// MESSAGES
-app.post("/message/:group_id", [verifyToken, redirectAnonymous], (req, res)=>{
-    if(!req.params.group_id)
-        return res.status(400).json({success: false, error: "Bad parameter"})
-    const group = findGroupStatement.get(req.params.group_id);
-    if(!group)
-        return res.status(400).json({success: false, error: "Group not found"})
-    const isMember = checkMembershipStatement.get(req.decoded.uid, group.uid);
-    if(!isMember)
-        return res.status(403).json({success: false, error: "You are not a member of this group"})
-    const { message } = req.body;
-    createMessageStatement.run(req.decoded.uid, group.uid, message);
-    res.redirect(`/group/${group.uid}`)
-});
 // GIFTS
 app.post("/dibs", [verifyToken, redirectAnonymous], (req, res)=>{
     const { gift_name: title, gift_description: description, link, for_, group_id } = req.body;
@@ -273,8 +266,91 @@ app.get("/", [verifyToken, redirectAnonymous], (req, res) => {
 
 // TODO: make redirectAnonymous treat POST requests differently
 
-app.listen(PORT, HOST, () => {
+const server = app.listen(PORT, HOST, () => {
     console.log(`Listening on http://${HOST}:${PORT}`);
+});
+
+const { Server } = require("socket.io");
+const io = new Server(server);
+
+function updateUserSession(uid, socket_id){
+    const session = getSessionByUserStatement.get(uid);
+    if(session){
+        updateSessionStatement.run(socket_id, uid);
+    } else {
+        createSessionStatement.run(uid, socket_id);
+    }
+}
+
+io.on('connection', function(socket){
+    console.log(socket.id);
+    socket.on('new_message', data => {
+        const { group_id, message } = data;
+        const session = getSessionStatement.get(socket.id);
+        if(!session){
+            return;
+        }
+        const user = getUserById.get(session.user);
+        if(!user){
+            return;
+        }
+        const uid = user.uid;
+        const from = user.username;
+        const group = findGroupStatement.get(group_id);
+        if(!group){
+            return;
+        }
+        const isMember = checkMembershipStatement.get(uid, group_id);
+        if(!isMember){
+            if(DEBUG) console.log(`${uid} is not a member of ${group_id}`);
+            return;
+        }
+        createMessageStatement.run(uid, group_id, message);
+        // socket.emit("new_message", {success: true});
+        io.to(group_id).emit("new_message", {from, message});
+    });
+    socket.on("authenticate", ({token})=>{
+        jwt.verify(token, process.env.JWT_SECRET, (err, decoded)=>{
+            if(err)
+                return socket.emit("auth", {success: false, error: err});
+            console.log(`socket ${socket.id} is user ${decoded.uid}`);
+            updateUserSession(decoded.uid, socket.id);
+            socket.emit("auth", {success: true});
+        });
+    });
+    socket.on("join", ({group_id})=>{
+        console.log(`socket ${socket.id} attempted to join group ${group_id}`)
+        const session = getSessionStatement.get(socket.id);
+        if(!session)
+            return socket.emit("join", {success: false, error: "You are not authenticated"});
+        const uid = session.user;
+        const isMember = checkMembershipStatement.get(uid, group_id);
+        if(!isMember)
+            return socket.emit("join", {success: false, error: "You are not a member of this group"});
+        console.log(`socket ${socket.id} joined group ${group_id}`)
+        socket.join(group_id);
+    });
+    socket.on("disconnect", ()=>{
+        database.prepare("DELETE FROM sessions WHERE socket_id = ?").run(socket.id);
+    });
+//     socket.on('oupdate', sUpdate);
+//     function sUpdate(state){
+//       socket.broadcast.emit('iupdate', state);
+//     }
+//     socket.on('disconnect', function(){
+//       connections--;
+//       if(connections < 2){
+//         socket.broadcast.emit('game-open');
+//       }
+//       console.log(connections + " connections");
+//     });
+//     socket.on('game-over', function(){
+//       socket.broadcast.emit('lost');
+//     });
+//     console.log(connections + " connections");
+//   } else {
+//     io.to(socket.id).emit('overload');
+//   }
 });
 
 // db.function('add2', (a, b) => a + b);
