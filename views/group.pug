@@ -23,9 +23,15 @@ html(lang="en")
             a(href="/leave/"+group.uid style="color: red;") Leave Group
         form(action="/invite", method="post")
             h3 Invite a User: 
-            input(type="text", name="email")
+            input(type="email", name="email" placeholder="Email")
             input(type="hidden", name="group_id", value=group.uid)
             input(type="submit", value="Invite") 
+            if group.invite_id 
+                p Or share this code: 
+                    span#invite_id #{group.invite_id}
+            else 
+                p Generate an invite code: 
+                    a#generate_invite(href="/generate-invite/"+group.uid) Generate
         form(action="/dibs", method="post") 
             h3 Reserve a gift 
             select(name="for_")
@@ -46,3 +52,4 @@ html(lang="en")
                 input(type="submit", value="Dibs!")
         p
             a(href="/") Back to Home
+        script(src="/static/scripts/invite.js")

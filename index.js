@@ -1,4 +1,5 @@
 const path = require("path");
+const {v5: uuidv5} = require("uuid");
 require("dotenv/config");
 
 const DEBUG = false;
@@ -29,6 +30,7 @@ if(DB_PERFORMANCE_MODE){
     database.pragma("journal_mode = WAL");
 }
 // DB SETUP
+database.function("get_inviteID", (group_id) => uuidv5(group_id.toString(), process.env.UUID_NAMESPACE));
 database.prepare("CREATE TABLE IF NOT EXISTS users (uid INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT, email TEXT, password TEXT)").run();
 database.prepare("CREATE TABLE IF NOT EXISTS groups (uid INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, description TEXT)").run();
 database.prepare("CREATE TABLE IF NOT EXISTS gifts (uid INTEGER PRIMARY KEY AUTOINCREMENT, from_ INTEGER, to_ INTEGER, group_id INTEGER, title TEXT, description TEXT, link TEXT)").run();
@@ -42,6 +44,9 @@ const createGiftStatement = database.prepare("INSERT INTO gifts (from_, to_, gro
 const createMembershipStatement = database.prepare("INSERT INTO membership (user, group_id) VALUES (?, ?)");
 const createMessageStatement = database.prepare("INSERT INTO messages (from_, group_id, message) VALUES (?, ?, ?)");
 const createUserStatement = database.prepare("INSERT INTO users (username, email, password) VALUES (?, ?, ?)");
+
+const giveGroupInviteId = database.prepare("UPDATE groups SET invite_id = get_inviteID(?) WHERE uid = ?");
+const getGroupByInviteId = database.prepare("SELECT * FROM groups WHERE invite_id = ?");
 
 const findUserByEmailStatement = database.prepare("SELECT * FROM users WHERE email = ?");
 const getUserById = database.prepare("SELECT * FROM users WHERE uid = ?");
@@ -128,8 +133,9 @@ app.get("/create", [verifyToken, redirectAnonymous], (req, res) => {
 app.post("/create", [verifyToken, redirectAnonymous], (req, res) => {
     const { groupname: name, description } = req.body;
     createGroupStatement.run(name, description);
+    // The below requires names to be unique
     addMemberStatement.run(req.decoded.uid, database.prepare("SELECT uid FROM groups WHERE name = ?").pluck().get(name));
-    res.json({ success: true });
+    res.redirect("/group"+database.prepare("SELECT uid FROM groups WHERE name = ?").pluck().get(name));
 });
 
 // Within Group
@@ -152,6 +158,7 @@ app.get("/invites", [verifyToken, redirectAnonymous], (req, res) => {
         Object.assign({invitee: getUserById.get(x.from_)},x)
     )});
 });
+// TODO: don't allow repeat invites
 app.post("/invite", [verifyToken, redirectAnonymous], (req, res)=>{
     const isMember = checkMembershipStatement.get(req.decoded.uid, req.body.group_id);
     if(!isMember)
@@ -165,7 +172,7 @@ app.post("/invite", [verifyToken, redirectAnonymous], (req, res)=>{
         return res.status(400).json({ error: "Invite already sent" });
     }
     inviteUserStatement.run(req.decoded.uid, user.uid, req.body.group_id);
-    res.json({ success: true }); // TODO: heck if SQL was successful
+    res.redirect("/group/"+req.body.group_id); // TODO: check if SQL was successful
 });
 app.get("/accept/:id", [verifyToken, redirectAnonymous], (req, res)=>{
     const invite = getInviteStatement.get(req.decoded.uid, req.params.id);
@@ -173,7 +180,7 @@ app.get("/accept/:id", [verifyToken, redirectAnonymous], (req, res)=>{
         return res.status(400).json({ error: "Invite not found" });
     deleteInviteStatement.run(invite.uid);
     addMemberStatement.run(req.decoded.uid, invite.group_id);
-    res.json({success: true});
+    res.redirect("/group/"+invite.group_id);
 });
 app.get("/decline/:id", [verifyToken, redirectAnonymous], (req, res)=>{
     res.json({success: false, error: "???"});
@@ -183,11 +190,23 @@ app.get("/leave/:id", [verifyToken, redirectAnonymous], (req, res)=>{
     if(!isMember)
         return res.status(403).json({ error: "You are not a member of this group" });
     deleteMembershipStatement.run(req.decoded.uid, req.params.id);
-    database.prepare("DELETE FROM gifts WHERE (to_ = ? OR from_ = ?) AND group_id = ?").run(req.decoded.uid, req.params.id);
-    database.prepare("DELETE FROM messages WHERE (to_ = ? OR from_ = ?) AND group_id = ?").run(req.decoded.uid, req.params.id);
+    database.prepare("DELETE FROM gifts WHERE (to_ = ? OR from_ = ?) AND group_id = ?").run(req.decoded.uid, req.decoded.uid, req.params.id);
+    database.prepare("DELETE FROM messages WHERE (to_ = ? OR from_ = ?) AND group_id = ?").run(req.decoded.uid, req.decoded.uid, req.params.id);
     // Delete all traces of user in group
-    res.json({success: true});
+    res.redirect("/");
 });
+app.get("/join/:invite_id", [verifyToken, redirectAnonymous], (req, res)=>{
+    if(!req.params.invite_id)
+        return res.status(400).json({success: false, error: "Bad parameter"})
+    const group = getGroupByInviteId.get(req.params.invite_id);
+    if(!group)
+        return res.status(400).json({success: false, error: "Group not found"})
+    const isMember = checkMembershipStatement.get(req.decoded.uid, group.uid);
+    if(isMember)
+        return res.status(400).json({success: false, error: "You are already a member of this group"})
+    addMemberStatement.run(req.decoded.uid, group.uid);
+    res.redirect(`/group/${group.uid}`)
+})
 
 // GIFTS
 app.post("/dibs", [verifyToken, redirectAnonymous], (req, res)=>{
@@ -197,7 +216,7 @@ app.post("/dibs", [verifyToken, redirectAnonymous], (req, res)=>{
     if(!isSenderMember || !isRecipientMember)
         return res.status(403).json({ error: "You are not a member of this group or the recipient is not a member of this group" });
     createGiftStatement.run(req.decoded.uid, for_, group_id, title, description, link);
-    res.json({ success: true });
+    res.redirect("/group/"+group_id);
 });
 app.post("/update/dibs/:id", [verifyToken, redirectAnonymous], (req, res)=>{
     const gift = getGiftById.get(req.params.id);
@@ -208,6 +227,18 @@ app.post("/update/dibs/:id", [verifyToken, redirectAnonymous], (req, res)=>{
     const { name: title, description, link } = req.body;
     updateGiftStatement.run(title, description, link, req.params.id);
     res.redirect(`/`);
+});
+app.get("/generate-invite/:id", [verifyToken, redirectAnonymous], (req, res)=>{
+    if(!req.params.id)
+        return res.status(400).json({success: false, error: "Bad parameter"})
+    const group = findGroupStatement.get(req.params.id);
+    if (!group)
+        return res.status(400).json({success: false, error: "Group not found"})
+    const isMember = checkMembershipStatement.get(req.decoded.uid, group.uid);
+    if (!isMember)
+        return res.status(403).json({success: false, error: "You are not a member of this group"})
+    giveGroupInviteId.run(req.params.id, req.params.id);
+    res.redirect("/group/"+req.params.id);
 });
 app.post("/delete/dibs/:id", [verifyToken, redirectAnonymous], (req, res)=>{
     const gift = getGiftById.get(req.params.id);

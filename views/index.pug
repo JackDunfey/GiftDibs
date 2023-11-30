@@ -13,6 +13,8 @@ html(lang="en")
             each group in groups 
                 li 
                     a(href="/group/"+group.uid) #{group.name}
+        p
+            a(href="/invites") View your invites
         p Your reserved gifts: 
         ul 
             each gift in gifts 
