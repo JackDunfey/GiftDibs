@@ -4,7 +4,7 @@ require("dotenv/config");
 
 const DEBUG = false;
 const DB_PERFORMANCE_MODE = false
-const DB_LOG = false;
+const DB_LOG = true;
 
 const express = require("express");
 const app = express();
@@ -40,22 +40,19 @@ database.prepare("CREATE TABLE IF NOT EXISTS invites (uid INTEGER PRIMARY KEY AU
 // STATEMENTS
 // TODO: research joins
 const createGroupStatement = database.prepare("INSERT INTO groups (name, description) VALUES (?, ?)");
-const createGiftStatement = database.prepare("INSERT INTO gifts (from_, to_, group_id, title, description, link) VALUES (?, ?, ?, ?, ?, ?)");
-const createMembershipStatement = database.prepare("INSERT INTO membership (user, group_id) VALUES (?, ?)");
-const createMessageStatement = database.prepare("INSERT INTO messages (from_, group_id, message) VALUES (?, ?, ?)");
-const createUserStatement = database.prepare("INSERT INTO users (username, email, password) VALUES (?, ?, ?)");
-
 const giveGroupInviteId = database.prepare("UPDATE groups SET invite_id = get_inviteID(?) WHERE uid = ?");
 const getGroupByInviteId = database.prepare("SELECT * FROM groups WHERE invite_id = ?");
 
+const createMessageStatement = database.prepare("INSERT INTO messages (from_, group_id, message) VALUES (?, ?, ?)");
+const getMessagesByGroupStatement = database.prepare("SELECT messages.message, from_.uid as 'from_', from_.username as 'from_name' FROM messages JOIN users from_ ON messages.from_ == from_.uid WHERE messages.group_id = ?");
+
+const createUserStatement = database.prepare("INSERT INTO users (username, email, password) VALUES (?, ?, ?)");
 const findUserByEmailStatement = database.prepare("SELECT * FROM users WHERE email = ?");
 const getUserById = database.prepare("SELECT * FROM users WHERE uid = ?");
 const findGroupStatement = database.prepare("SELECT * FROM groups WHERE uid = ?");
-const getGroupMessagesStatement = database.prepare("SELECT * FROM messages WHERE group_id = ?");
 const getGroupMembersStatement = database.prepare("SELECT * FROM users WHERE uid IN (SELECT user FROM membership WHERE group_id = ?)");
 
-const getGiftsByGroupStatement = database.prepare("SELECT * FROM gifts WHERE group_id = ?");
-const getGiftsByGroupNotUser = database.prepare("SELECT * FROM gifts WHERE group_id = ? AND to_ != ?");
+const createGiftStatement = database.prepare("INSERT INTO gifts (from_, to_, group_id, title, description, link) VALUES (?, ?, ?, ?, ?, ?)");
 const getOutgoingGifts = database.prepare("SELECT * FROM users JOIN gifts ON gifts.to_ = users.uid WHERE from_ = ?");
 const getGiftsAndUsersByGroupStatement = database.prepare("SELECT gifts.uid, gifts.from_, gifts.to_, gifts.group_id, gifts.title, gifts.description, gifts.link, to_.username as 'to', from_.username as 'from' FROM gifts JOIN users to_ ON gifts.to_ = to_.uid JOIN users from_ ON gifts.from_ = from_.uid WHERE gifts.group_id = ? AND gifts.to_ != ?");
 const getGiftById = database.prepare("SELECT * FROM gifts WHERE uid = ?");
@@ -63,16 +60,16 @@ const deleteGiftById = database.prepare("DELETE FROM gifts WHERE uid = ?");
 const updateGiftStatement = database.prepare("UPDATE gifts SET title = ?, description = ?, link = ? WHERE uid = ?");
 
 const addMemberStatement = database.prepare("INSERT INTO membership (user, group_id) VALUES (?, ?)");
-const getUsersMembershipsStatement = database.prepare("SELECT group_id FROM membership WHERE user = ?");
 const getUsersGroupsStatement = database.prepare("SELECT * FROM groups WHERE uid IN (SELECT group_id FROM membership WHERE user = ?)");
 const checkMembershipStatement = database.prepare("SELECT * FROM membership WHERE user = ? AND group_id = ?");
 const deleteMembershipStatement = database.prepare("DELETE FROM membership WHERE user = ? AND group_id = ?");
 
 const inviteUserStatement = database.prepare("INSERT INTO invites (from_, to_, group_id) VALUES (?, ?, ?)");
-const deleteInviteStatement = database.prepare("DELETE FROM invites WHERE uid = ?");
-const getInviteStatement = database.prepare("SELECT * FROM invites WHERE to_ = ? AND group_id = ?");
+const deleteInviteStatement = database.prepare("DELETE FROM invites WHERE to_ = ? AND group_id = ?");
+const isInvitedStatement = database.prepare("SELECT * FROM invites WHERE to_ = ? AND group_id = ?");
+const getInviteStatement = database.prepare("SELECT * FROM invites WHERE from_ = ? AND to_ = ? AND group_id = ?");
 const getUserGroupInviteStatement = database.prepare("SELECT invites.uid, invites.from_, invites.to_, invites.group_id, groups.name, groups.description FROM invites JOIN groups ON invites.group_id = groups.uid WHERE invites.to_ = ?");
-const getPendngInvitesByGroup = database.prepare("SELECT * FROM invites WHERE group_id = ?");
+const getPendngInvitesByGroup = database.prepare("SELECT invites.uid, invites.group_id, from_.username as 'from_name', to_.username as 'to_name', from_.uid as 'from_', to_.uid as 'to_' FROM invites JOIN users to_ ON invites.to_ = to_.uid JOIN users from_ ON invites.from_ = from_.uid WHERE invites.group_id = ?");
 // TODO: Add messages last
 
 
@@ -83,8 +80,9 @@ function registerUser(username, email, password) {
         return [false, "Username already taken"];
     }
     const hashedPassword = bcrypt.hashSync(password, 10);
-    database.prepare("INSERT INTO users (username, email, password) VALUES (?, ?, ?)").run(username, email, hashedPassword);
+    createUserStatement.run(username, email, hashedPassword);
     if (DEBUG) console.log(`Registered user ${username} with email ${email} and password ${password}`);
+    // FIXME: BELOW LINE IS INSECURE BUT COULD BE EASILY FIXED
     const userid = database.prepare("SELECT uid FROM users WHERE username = ? AND email = ?").pluck().get(username, email);
     return [true, userid]; // return true if successful, false if not
 }
@@ -116,16 +114,6 @@ app.post("/login", async (req, res) => {
     }
 });
 
-
-app.get("/", [verifyToken, redirectAnonymous], (req, res) => {
-    const groups = getUsersGroupsStatement.all(req.decoded.uid);
-    const gifts = getOutgoingGifts.all(req.decoded.uid);
-    res.render("index", {
-        message: "Hello world!",
-        groups, gifts
-    });
-});
-
 // CREATE GROUP
 app.get("/create", [verifyToken, redirectAnonymous], (req, res) => {
     res.render("create");
@@ -149,16 +137,21 @@ app.get("/group/:id", [verifyToken, redirectAnonymous], (req, res) => {
 
     const gifts = getGiftsAndUsersByGroupStatement.all(req.params.id, req.decoded.uid);
     const members = getGroupMembersStatement.all(req.params.id);
-    const messages = getGroupMessagesStatement.all(req.params.id);
-    res.render("group", { group, gifts, members: members.map(({uid, username})=>Object.assign({},{uid,username})), messages, uid: req.decoded.uid });
+    const messages = getMessagesByGroupStatement.all(req.params.id);
+    const pending = getPendngInvitesByGroup.all(req.params.id);
+    res.render("group", { group, gifts, members: members.map(({uid, username})=>Object.assign({},{uid,username})), messages, uid: req.decoded.uid, pending, messages });
 });
-app.get("/invites", [verifyToken, redirectAnonymous], (req, res) => {
-    const invites = getUserGroupInviteStatement.all(req.decoded.uid);
-    res.render("invites", { invites: invites.map(x=>
+function getUsersInvites(uid){
+    const invites = getUserGroupInviteStatement.all(uid);
+    // VERY INEFFICIENT
+    return invites.map(x=>
         Object.assign({invitee: getUserById.get(x.from_)},x)
-    )});
+    );
+}
+app.get("/invites", [verifyToken, redirectAnonymous], (req, res) => {
+    const invites = getUsersInvites(req.decoded.uid);
+    res.render("invites", { invites });
 });
-// TODO: don't allow repeat invites
 app.post("/invite", [verifyToken, redirectAnonymous], (req, res)=>{
     const isMember = checkMembershipStatement.get(req.decoded.uid, req.body.group_id);
     if(!isMember)
@@ -166,8 +159,7 @@ app.post("/invite", [verifyToken, redirectAnonymous], (req, res)=>{
     const user = findUserByEmailStatement.get(req.body.email);
     if(!user)
         return res.status(400).json({ error: "User not found" }); // TODO: add support to invite non-users
-    
-    const invite = getInviteStatement.get(req.decoded.uid, user.uid);
+    const invite = getInviteStatement.get(req.decoded.uid, user.uid, parseInt(req.body.group_id));
     if(invite){
         return res.status(400).json({ error: "Invite already sent" });
     }
@@ -175,12 +167,18 @@ app.post("/invite", [verifyToken, redirectAnonymous], (req, res)=>{
     res.redirect("/group/"+req.body.group_id); // TODO: check if SQL was successful
 });
 app.get("/accept/:id", [verifyToken, redirectAnonymous], (req, res)=>{
-    const invite = getInviteStatement.get(req.decoded.uid, req.params.id);
+    const invite = isInvitedStatement.get(req.decoded.uid, req.params.id);
     if(!invite)
         return res.status(400).json({ error: "Invite not found" });
-    deleteInviteStatement.run(invite.uid);
     addMemberStatement.run(req.decoded.uid, invite.group_id);
+    deleteInviteStatement.run(req.decoded.uid, invite.group_id);
     res.redirect("/group/"+invite.group_id);
+});
+// FIXME: Oh no hidden SQL
+const cancelInviteStatement = database.prepare("DELETE FROM invites WHERE from_ = ? AND to_ = ? AND group_id = ?");
+app.get("/cancel/:group_id/:user_id", [verifyToken, redirectAnonymous], (req, res)=>{
+    cancelInviteStatement.run(req.decoded.uid, req.params.user_id, req.params.group_id);
+    res.redirect("/group/"+req.params.group_id);
 });
 app.get("/decline/:id", [verifyToken, redirectAnonymous], (req, res)=>{
     res.json({success: false, error: "???"});
@@ -207,7 +205,20 @@ app.get("/join/:invite_id", [verifyToken, redirectAnonymous], (req, res)=>{
     addMemberStatement.run(req.decoded.uid, group.uid);
     res.redirect(`/group/${group.uid}`)
 })
-
+// MESSAGES
+app.post("/message/:group_id", [verifyToken, redirectAnonymous], (req, res)=>{
+    if(!req.params.group_id)
+        return res.status(400).json({success: false, error: "Bad parameter"})
+    const group = findGroupStatement.get(req.params.group_id);
+    if(!group)
+        return res.status(400).json({success: false, error: "Group not found"})
+    const isMember = checkMembershipStatement.get(req.decoded.uid, group.uid);
+    if(!isMember)
+        return res.status(403).json({success: false, error: "You are not a member of this group"})
+    const { message } = req.body;
+    createMessageStatement.run(req.decoded.uid, group.uid, message);
+    res.redirect(`/group/${group.uid}`)
+});
 // GIFTS
 app.post("/dibs", [verifyToken, redirectAnonymous], (req, res)=>{
     const { gift_name: title, gift_description: description, link, for_, group_id } = req.body;
@@ -248,6 +259,16 @@ app.post("/delete/dibs/:id", [verifyToken, redirectAnonymous], (req, res)=>{
         return res.status(403).json({ error: "You are not the owner of this gift" });
     deleteGiftById.run(req.params.id);
     res.json({ success: true });
+});
+
+app.get("/", [verifyToken, redirectAnonymous], (req, res) => {
+    const groups = getUsersGroupsStatement.all(req.decoded.uid);
+    const gifts = getOutgoingGifts.all(req.decoded.uid);
+    const invites = getUsersInvites(req.decoded.uid);
+    res.render("index", {
+        message: "Hello world!",
+        groups, gifts, invites
+    });
 });
 
 // TODO: make redirectAnonymous treat POST requests differently

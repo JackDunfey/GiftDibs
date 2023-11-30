@@ -1,0 +1,3 @@
+- Messages
+- Wishlist viewable by friends
+    - Share to specific group or all
