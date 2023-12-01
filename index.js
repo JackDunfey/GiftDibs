@@ -82,6 +82,9 @@ const deleteSessionByUserStatement = database.prepare("DELETE FROM sessions WHER
 // Make sessions expire automatically
 
 // REGISTER AND LOGIN
+function getToken(uid){
+    return jwt.sign({ uid }, process.env.JWT_SECRET);
+}
 function registerUser(username, email, password) {
     const user = database.prepare("SELECT * FROM users WHERE email = ?").get(email);
     if(user){
@@ -101,7 +104,7 @@ app.post("/register", async (req, res) => {
     const { username, email, password } = req.body;
     let [success, data] = registerUser(username, email, password)
     if(success){
-        return res.cookie("token", jwt.sign({ uid: data }, process.env.JWT_SECRET)).redirect("/");
+        return res.cookie("token", getToken(data)).redirect("/");
     } else {
         return res.status(400).json({ success: false, error: data });
     }
@@ -115,8 +118,7 @@ app.post("/login", async (req, res) => {
     if (!user)
         return res.status(400).json({ error: "User not found" });
     if (bcrypt.compareSync(password, user.password)) {
-        const token = jwt.sign({ uid: user.uid }, process.env.JWT_SECRET);
-        return res.cookie("token", token).redirect(req.query.redirect ? decodeURIComponent(req.query.redirect) : "/");
+        return res.cookie("token", getToken(user.uid)).redirect(req.query.redirect ? decodeURIComponent(req.query.redirect) : "/");
     } else {
         return res.status(400).json({ error: "Invalid password" });
     }
