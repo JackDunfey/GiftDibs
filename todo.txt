@@ -1,3 +1,4 @@
 - Messages
+    - add multiroom support
 - Wishlist viewable by friends
     - Share to specific group or all

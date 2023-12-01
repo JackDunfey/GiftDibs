@@ -23,5 +23,6 @@ document.forms.messageForm.addEventListener("submit", (e) => {
     e.preventDefault();
     e.stopPropagation();
     const message = document.forms.messageForm.message.value;
+    document.forms.messageForm.message.value = "";
     socket.emit("new_message", {message, group_id});
 });

@@ -38,6 +38,7 @@ database.prepare("CREATE TABLE IF NOT EXISTS membership (uid INTEGER PRIMARY KEY
 database.prepare("CREATE TABLE IF NOT EXISTS messages (uid INTEGER PRIMARY KEY AUTOINCREMENT, from_ INTEGER, group_id INTEGER, message TEXT)").run();
 database.prepare("CREATE TABLE IF NOT EXISTS invites (uid INTEGER PRIMARY KEY AUTOINCREMENT, from_ INTEGER, to_ INTEGER, group_id INTEGER)").run();
 database.prepare("CREATE TABLE IF NOT EXISTS sessions (uid INTEGER PRIMARY KEY AUTOINCREMENT, user INTEGER, socket_id TEXT)").run();
+database.prepare("DELETE FROM sessions").run();
 // STATEMENTS
 // TODO: research joins
 const createGroupStatement = database.prepare("INSERT INTO groups (name, description) VALUES (?, ?)");
@@ -274,12 +275,15 @@ const { Server } = require("socket.io");
 const io = new Server(server);
 
 function updateUserSession(uid, socket_id){
-    const session = getSessionByUserStatement.get(uid);
-    if(session){
-        updateSessionStatement.run(socket_id, uid);
-    } else {
-        createSessionStatement.run(uid, socket_id);
-    }
+    createSessionStatement.run(uid, socket_id);
+    getSessionByUserStatement.all(uid).forEach(session=>{
+        if(session.socket_id == socket_id){
+            deleteSessionStatement.run(session.socket_id);
+            createSessionStatement.run(uid, socket_id);
+        } else if(expired = false){
+            // delete
+        }
+    });
 }
 
 io.on('connection', function(socket){
