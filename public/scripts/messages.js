@@ -1,13 +1,38 @@
 const socket = io();
-socket.on("connect", () => {
+// function getCookie(name) {
+//     const match = document.cookie.match(new RegExp('(^| )' + name + '=([^;]+)'));
+//     return match ? match[2] : null;
+// }
+function authenticateSocket(socket, token){
+    if(token){
+        socket.emit("authenticate", {token});
+        return;
+    }
     getCookie("token") && socket.emit("authenticate", {token: getCookie("token")});
+}
+socket.on("connect", () => {
+    let authAttempts = 1;
+    authenticateSocket(socket);
     socket.on("auth", ({success}) => {
-        if(!success)
-            return console.error("Authentication failed");
-        socket.emit("join", {group_id});
+        if(success){
+            console.info("Successfully authenticated socket");
+            return socket.emit("join", {group_id});
+        }
+        console.error("Authentication failed");
+        console.info("Attempting to re-authenticate");
+        authenticateSocket(socket);
+        if(authAttempts++ > 3){
+            console.error("Failed to authenticate after 3 attempts");
+            window.location = "/login";
+            return socket.disconnect();
+        }
     });
     socket.on("send", data=>{
         console.table(data);
+    });
+    socket.on("join", data=>{
+        if(data.success) return console.info(`Successfully joined group ${group_id}`);
+        console.error("Failed to join group", data.error);
     });
     socket.on("new_message", data=>{
         const new_message = document.createElement("p");

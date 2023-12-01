@@ -5,7 +5,10 @@ function verifyToken(req, res, next){
     if(req.cookies.token){
         jwt.verify(req.cookies.token, process.env.JWT_SECRET, (err, decoded) => {
             if(err){
-                res.status(400).json({ error: "Invalid token" });
+                // res.status(400).json({ error: "Invalid token" });
+                res.clearCookie("token");
+                req.decoded = null;
+                next();
             } else {
                 req.decoded = decoded.uid ? decoded : null;
                 next();

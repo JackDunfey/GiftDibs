@@ -116,7 +116,7 @@ app.post("/login", async (req, res) => {
         return res.status(400).json({ error: "User not found" });
     if (bcrypt.compareSync(password, user.password)) {
         const token = jwt.sign({ uid: user.uid }, process.env.JWT_SECRET);
-        return res.cookie("token", token).redirect("/");
+        return res.cookie("token", token).redirect(req.query.redirect ? decodeURIComponent(req.query.redirect) : "/");
     } else {
         return res.status(400).json({ error: "Invalid password" });
     }
@@ -291,26 +291,31 @@ io.on('connection', function(socket){
     socket.on('new_message', data => {
         const { group_id, message } = data;
         const session = getSessionStatement.get(socket.id);
+        let DEBUG = true;
         if(!session){
-            return;
+            if(DEBUG) console.log(`Socket ${socket.id} is not authenticated`);
+            return socket.emit("send", {success: false, error: "You are not authenticated"});
         }
         const user = getUserById.get(session.user);
         if(!user){
-            return;
+            if(DEBUG) console.log(`User ${session.user} not found`);
+            return socket.emit("send", {success: false, error: "User not found"});
         }
         const uid = user.uid;
         const from = user.username;
         const group = findGroupStatement.get(group_id);
         if(!group){
-            return;
+            if(DEBUG) console.log(`Group ${group_id} not found`);
+            return socket.emit("send", {success: false, error: "Group not found"});
         }
         const isMember = checkMembershipStatement.get(uid, group_id);
         if(!isMember){
             if(DEBUG) console.log(`${uid} is not a member of ${group_id}`);
-            return;
+            return socket.emit("send", {success: false, error: "You are not a member of this group"});
         }
         createMessageStatement.run(uid, group_id, message);
         // socket.emit("new_message", {success: true});
+        console.info(`User ${uid} sent message ${message} to group ${group_id}`);
         io.to(group_id).emit("new_message", {from, message});
     });
     socket.on("authenticate", ({token})=>{
@@ -333,30 +338,12 @@ io.on('connection', function(socket){
             return socket.emit("join", {success: false, error: "You are not a member of this group"});
         console.log(`socket ${socket.id} joined group ${group_id}`)
         socket.join(group_id);
+        socket.emit("join", {success: true});
     });
     socket.on("disconnect", ()=>{
         database.prepare("DELETE FROM sessions WHERE socket_id = ?").run(socket.id);
     });
-//     socket.on('oupdate', sUpdate);
-//     function sUpdate(state){
-//       socket.broadcast.emit('iupdate', state);
-//     }
-//     socket.on('disconnect', function(){
-//       connections--;
-//       if(connections < 2){
-//         socket.broadcast.emit('game-open');
-//       }
-//       console.log(connections + " connections");
-//     });
-//     socket.on('game-over', function(){
-//       socket.broadcast.emit('lost');
-//     });
-//     console.log(connections + " connections");
-//   } else {
-//     io.to(socket.id).emit('overload');
-//   }
 });
-
 // db.function('add2', (a, b) => a + b);
 
 // db.prepare
